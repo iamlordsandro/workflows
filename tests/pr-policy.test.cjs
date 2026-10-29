@@ -26,7 +26,7 @@ function fixture(title, options = {}) {
     async graphql() {
       return { repository: { squashMergeAllowed: settings.allow_squash_merge,
         mergeCommitAllowed: settings.allow_merge_commit, rebaseMergeAllowed: settings.allow_rebase_merge,
-        squashMergeCommitHeadline: settings.squash_merge_commit_title } };
+        squashMergeCommitTitle: settings.squash_merge_commit_title } };
     },
     async paginate() {
       return (options.commits || []).map((message) => ({ commit: { message } }));
