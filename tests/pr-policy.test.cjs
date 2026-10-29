@@ -22,7 +22,11 @@ function fixture(title, options = {}) {
         async update(value) { calls.push(value); pull.title = value.title; return { data: pull }; },
         listCommits() {},
       },
-      repos: { async get() { return { data: settings }; } },
+    },
+    async graphql() {
+      return { repository: { squashMergeAllowed: settings.allow_squash_merge,
+        mergeCommitAllowed: settings.allow_merge_commit, rebaseMergeAllowed: settings.allow_rebase_merge,
+        squashMergeCommitHeadline: settings.squash_merge_commit_title } };
     },
     async paginate() {
       return (options.commits || []).map((message) => ({ commit: { message } }));
@@ -138,8 +142,8 @@ test('does not certify a changed title when no mutation was needed', async () =>
 });
 test('rechecks the head after the repository settings lookup', async () => {
   const f = fixture('feat: change');
-  const get = f.github.rest.repos.get;
-  f.github.rest.repos.get = async () => {
+  const get = f.github.graphql;
+  f.github.graphql = async () => {
     f.pull.head.sha = 'head-after-settings';
     return get();
   };
