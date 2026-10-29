@@ -1,0 +1,78 @@
+name: PR assignment
+
+on:
+  workflow_call:
+    inputs:
+      extra_assignees_json:
+        description: JSON array of additional assignable GitHub usernames.
+        type: string
+        default: '[]'
+
+permissions:
+  issues: write
+
+jobs:
+  assign:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assign the PR author and configured users
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          EXTRA_ASSIGNEES_JSON: ${{ inputs.extra_assignees_json }}
+        with:
+          script: |
+            let extras;
+            try { extras = JSON.parse(process.env.EXTRA_ASSIGNEES_JSON ?? '[]'); }
+            catch { throw new Error('EXTRA_ASSIGNEES_JSON must contain valid JSON.'); }
+            if (!Array.isArray(extras) || extras.some((login) => typeof login !== 'string')) {
+              throw new Error('EXTRA_ASSIGNEES_JSON must be an array of GitHub usernames.');
+            }
+            for (const login of extras) {
+              if (!/^[a-z\d](?:[a-z\d-]{0,37}[a-z\d])?$/i.test(login.replace(/\[bot\]$/i, ''))) {
+                throw new Error(`Invalid extra assignee username: "${login}".`);
+              }
+            }
+
+            const { owner, repo } = context.repo;
+            const pullNumber = context.payload.pull_request?.number;
+            if (!Number.isInteger(pullNumber) || pullNumber < 1) {
+              throw new Error('PR assignment requires a pull_request event.');
+            }
+            const { data: pull } = await github.rest.issues.get({ owner, repo, issue_number: pullNumber });
+            const candidates = new Map();
+            if (pull.user?.login) candidates.set(pull.user.login.toLowerCase(), { login: pull.user.login, author: true, user: pull.user });
+            for (const login of extras) {
+              if (!candidates.has(login.toLowerCase())) candidates.set(login.toLowerCase(), { login, author: false });
+            }
+            const additions = [];
+            const current = new Set(pull.assignees.map((user) => user.login.toLowerCase()));
+            for (const candidate of candidates.values()) {
+              const { login, author } = candidate;
+              if (login.toLowerCase().endsWith('[bot]') || candidate.user?.type === 'Bot') {
+                core.info(`Skipping bot assignee: ${login}.`);
+                continue;
+              }
+              let user = candidate.user;
+              if (!user) {
+                try { ({ data: user } = await github.rest.users.getByUsername({ username: login })); }
+                catch (error) {
+                  if (error.status === 404) throw new Error(`Extra assignee "${login}" does not exist.`);
+                  throw error;
+                }
+              }
+              if (user.type === 'Bot') {
+                core.info(`Skipping bot assignee: ${login}.`);
+                continue;
+              }
+              try { await github.rest.issues.checkUserCanBeAssigned({ owner, repo, assignee: user.login }); }
+              catch (error) {
+                if (error.status !== 404) throw error;
+                if (!author) throw new Error(`Extra assignee "${login}" cannot be assigned in ${owner}/${repo}.`);
+                core.info(`Skipping unassignable PR author: ${login}.`);
+                continue;
+              }
+              if (!current.has(user.login.toLowerCase())) additions.push(user.login);
+            }
+            if (additions.length) {
+              await github.rest.issues.addAssignees({ owner, repo, issue_number: pullNumber, assignees: additions });
+            }

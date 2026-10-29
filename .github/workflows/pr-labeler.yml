@@ -1,0 +1,134 @@
+name: PR labeler
+
+on:
+  workflow_call:
+    inputs:
+      type_labels_json:
+        description: JSON object mapping conventional commit types to existing labels.
+        type: string
+        default: '{"fix":"bug","feat":"enhancement","docs":"documentation"}'
+      path_labels_json:
+        description: JSON object mapping existing labels to arrays of *, ** and ? path globs.
+        type: string
+        default: '{"documentation":["**/*.md","docs/**"]}'
+
+permissions:
+  pull-requests: write
+  issues: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Apply existing PR labels
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          TYPE_LABELS_JSON: ${{ inputs.type_labels_json }}
+          PATH_LABELS_JSON: ${{ inputs.path_labels_json }}
+        with:
+          script: |
+            function objectInput(name, fallback) {
+              let value;
+              try { value = JSON.parse(process.env[name] ?? fallback); }
+              catch { throw new Error(`${name} must contain valid JSON.`); }
+              if (!value || Array.isArray(value) || typeof value !== 'object') {
+                throw new Error(`${name} must be a JSON object.`);
+              }
+              return value;
+            }
+            function labelName(value) {
+              if (typeof value !== 'string' || !value.trim() || value !== value.trim()) {
+                throw new Error('Configured label names must be non-empty strings without surrounding whitespace.');
+              }
+              return value;
+            }
+            function globRegex(glob) {
+              if (typeof glob !== 'string' || !glob || glob.startsWith('/') ||
+                  glob.endsWith('/') || /[\\\[\]{}!\r\n\0]/.test(glob) ||
+                  glob.split('/').some((part) => !part || part === '.' || part === '..' ||
+                    (part.includes('**') && part !== '**'))) {
+                throw new Error('Path globs support only relative paths with *, ** and ? wildcards.');
+              }
+              let source = '^';
+              for (let index = 0; index < glob.length; index++) {
+                const character = glob[index];
+                if (character === '*' && glob[index + 1] === '*') {
+                  if (glob[index + 2] === '/') {
+                    source += '(?:.*/)?';
+                    index += 2;
+                  } else {
+                    source += '.*';
+                    index++;
+                  }
+                } else if (character === '*') source += '[^/]*';
+                else if (character === '?') source += '[^/]';
+                else source += character.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              }
+              return new RegExp(source + '$');
+            }
+
+            const typeConfig = objectInput('TYPE_LABELS_JSON', '{"fix":"bug","feat":"enhancement","docs":"documentation"}');
+            const pathConfig = objectInput('PATH_LABELS_JSON', '{"documentation":["**/*.md","docs/**"]}');
+            const typeLabels = new Map();
+            for (const [type, label] of Object.entries(typeConfig)) {
+              if (!/^[a-z][a-z0-9-]*$/.test(type)) {
+                throw new Error('Conventional commit type keys must use lowercase letters, digits or hyphens.');
+              }
+              typeLabels.set(type, labelName(label));
+            }
+            const pathLabels = Object.entries(pathConfig).map(([label, globs]) => {
+              labelName(label);
+              if (!Array.isArray(globs) || !globs.length) {
+                throw new Error(`Path label "${label}" must have a non-empty array of globs.`);
+              }
+              return [label, globs.map(globRegex)];
+            });
+
+            const { owner, repo } = context.repo;
+            const pullNumber = context.payload.pull_request?.number;
+            if (!Number.isInteger(pullNumber) || pullNumber < 1) {
+              throw new Error('PR labeler requires a pull_request event.');
+            }
+            const { data: pull } = await github.rest.pulls.get({ owner, repo, pull_number: pullNumber });
+            const canonicalLabels = new Map();
+            for (const label of new Set([...typeLabels.values(), ...pathLabels.map(([name]) => name)])) {
+              try {
+                const { data } = await github.rest.issues.getLabel({ owner, repo, name: label });
+                canonicalLabels.set(label, data.name);
+              } catch (error) {
+                if (error.status === 404) {
+                  throw new Error(`Configured label "${label}" does not exist in ${owner}/${repo}. Create it before using this workflow.`);
+                }
+                throw error;
+              }
+            }
+            const desired = new Set();
+            const type = pull.title.match(/^([a-z][a-z0-9-]*)(?:\([^()\r\n]+\))?!?:[ \t]+\S/i)?.[1].toLowerCase();
+            if (typeLabels.has(type)) desired.add(canonicalLabels.get(typeLabels.get(type)));
+            if (pathLabels.length) {
+              const files = await github.paginate(github.rest.pulls.listFiles, {
+                owner, repo, pull_number: pullNumber, per_page: 100,
+              });
+              for (const [label, patterns] of pathLabels) {
+                if (files.some((file) => patterns.some((pattern) => pattern.test(file.filename)))) {
+                  desired.add(canonicalLabels.get(label));
+                }
+              }
+            }
+            const current = new Set(pull.labels.map((label) =>
+              (typeof label === 'string' ? label : label.name).toLowerCase()));
+            const additions = [...desired].filter((label) => !current.has(label.toLowerCase()));
+            if (additions.length) {
+              await github.rest.issues.addLabels({ owner, repo, issue_number: pullNumber, labels: additions });
+            }
+            const desiredLower = new Set([...desired].map((label) => label.toLowerCase()));
+            const controlled = new Set([...typeLabels.values()].map((label) => canonicalLabels.get(label)));
+            for (const label of controlled) {
+              if (current.has(label.toLowerCase()) && !desiredLower.has(label.toLowerCase())) {
+                try {
+                  await github.rest.issues.removeLabel({ owner, repo, issue_number: pullNumber, name: label });
+                } catch (error) {
+                  if (error.status !== 404) throw error;
+                }
+              }
+            }

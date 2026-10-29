@@ -1,0 +1,131 @@
+name: PR title policy
+
+on:
+  workflow_call:
+    inputs:
+      default_type:
+        description: Conventional Commit type for otherwise ambiguous titles
+        type: string
+        default: chore
+      require_description:
+        description: Require a nonempty PR description
+        type: boolean
+        default: false
+      require_issue_reference:
+        description: Require an issue reference in the PR description
+        type: boolean
+        default: false
+      require_squash_settings:
+        description: Require squash-only merges using the PR title
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  normalize:
+    name: Normalize and validate PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Metadata only: never check out or execute pull request code here.
+      - name: Normalize the current title and validate the final merge policy
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          DEFAULT_TYPE: ${{ inputs.default_type }}
+          REQUIRE_DESCRIPTION: ${{ inputs.require_description }}
+          REQUIRE_ISSUE_REFERENCE: ${{ inputs.require_issue_reference }}
+          REQUIRE_SQUASH_SETTINGS: ${{ inputs.require_squash_settings }}
+        with:
+          script: |
+            const number = context.payload.pull_request?.number;
+            if (!number) throw new Error('This workflow requires a pull request event.');
+            const ref = { ...context.repo, pull_number: number };
+            const types = new Set(['feat', 'fix', 'docs', 'style', 'refactor', 'perf',
+              'test', 'build', 'ci', 'chore', 'revert']);
+            const aliases = new Map([['feature', 'feat'], ['bugfix', 'fix'],
+              ['hotfix', 'fix'], ['documentation', 'docs'], ['tests', 'test']]);
+            const typeFor = (value) => {
+              const lower = value.toLowerCase();
+              return aliases.get(lower) || (types.has(lower) ? lower : null);
+            };
+            const defaultType = typeFor(process.env.DEFAULT_TYPE || 'chore');
+            if (!defaultType) throw new Error('default_type must be a supported Conventional Commit type.');
+            const flag = (name, fallback = false) => {
+              const value = process.env[name];
+              if (value === undefined || value === '') return fallback;
+              if (value !== 'true' && value !== 'false') throw new Error(`${name} must be true or false.`);
+              return value === 'true';
+            };
+            const initial = (await github.rest.pulls.get(ref)).data;
+            if (initial.state !== 'open') {
+              core.info('The pull request is closed; no metadata was changed.');
+              return;
+            }
+            let title = initial.title.trim().replace(/\s+/g, ' ');
+            const prefixes = /^(?:wip:|draft:|fixup!|squash!)\s*/i;
+            while (prefixes.test(title)) title = title.replace(prefixes, '').trim();
+            if (!title) throw new Error('The title must contain a subject.');
+            let explicit = title.match(/^([a-z]+)(\([^()]+\))?(!)?\s*([:\-])\s*(.*)$/i);
+            if (explicit?.[4] === '-' && !typeFor(explicit[1])) explicit = null;
+            if (explicit) {
+              const type = typeFor(explicit[1]);
+              if (!type) throw new Error('The title has an unsupported Conventional Commit type.');
+              if (!explicit[5].trim()) throw new Error('The title must contain a subject.');
+              // Drop the optional scope; preserve a breaking-change marker.
+              title = `${type}${explicit[3] || ''}: ${explicit[5].trim()}`;
+            } else {
+              if (/^[a-z]+\([^:]*:/i.test(title)) throw new Error('The title has a malformed scope.');
+              const hints = [
+                ['fix', /^(?:fix(?:ed|es|ing)?|bugfix|hotfix|corregg\w*|corrett\w*|risolv\w*|risolt\w*)\b/i],
+                ['docs', /^(?:(?:add|update)\s+)?(?:docs?|readme|documentation|documentazione)\b/i],
+                ['test', /^(?:(?:add|update)\s+)?(?:tests?|coverage)\b/i],
+                ['refactor', /^(?:refactor\w*|rifattorizz\w*)\b/i],
+                ['perf', /^(?:optimi[sz]\w*|performance|ottimizz\w*)\b/i],
+                ['feat', /^(?:add(?:ed|s|ing)?|implement\w*|introduc\w*|enable\w*|aggiung\w*|aggiunt\w*|creat\w*|new|nuov\w*)\b/i],
+              ];
+              const subject = title.replace(/^(?:ho|abbiamo|we(?: have)?|i(?: have)?)\s+/i, '');
+              const titleType = hints.find(([, pattern]) => pattern.test(subject))?.[0];
+              const branchPrefix = (initial.head.ref || '').match(/^([a-z]+)(?:[\/_-]|$)/i)?.[1];
+              const branchType = branchPrefix && typeFor(branchPrefix);
+              let commitType = null;
+              if (!titleType && !branchType) {
+                const commits = await github.paginate(github.rest.pulls.listCommits, { ...ref, per_page: 100 });
+                const seen = new Set(commits.map(({ commit }) => {
+                  const match = commit.message.split('\n', 1)[0].match(/^([a-z]+)(?:\([^()]+\))?!?:\s+\S/i);
+                  return match && typeFor(match[1]);
+                }).filter(Boolean));
+                if (seen.size === 1) commitType = seen.values().next().value;
+              }
+              title = `${titleType || branchType || commitType || defaultType}: ${title}`;
+            }
+            if (!/^(?:feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)!?: \S.*$/.test(title)) {
+              throw new Error('The normalized title must use type: subject or type!: subject, without a scope.');
+            }
+            if (title !== initial.title) {
+              const before = (await github.rest.pulls.get(ref)).data;
+              if (before.state !== 'open' || before.title !== initial.title || before.head.sha !== initial.head.sha) {
+                throw new Error('The pull request changed before normalization; rerun against its current metadata.');
+              }
+              await github.rest.pulls.update({ ...ref, title });
+            }
+            if (flag('REQUIRE_SQUASH_SETTINGS', true)) {
+              const repo = (await github.rest.repos.get(context.repo)).data;
+              if (!repo.allow_squash_merge || repo.allow_merge_commit || repo.allow_rebase_merge ||
+                  repo.squash_merge_commit_title !== 'PR_TITLE') {
+                throw new Error('Configure squash-only merges and use the pull request title as the default squash commit title.');
+              }
+            }
+            const current = (await github.rest.pulls.get(ref)).data;
+            if (current.state !== 'open' || current.title !== title || current.head.sha !== initial.head.sha) {
+              throw new Error('The pull request changed during validation; rerun against its current metadata.');
+            }
+            if (flag('REQUIRE_DESCRIPTION') && !current.body?.trim()) {
+              throw new Error('A nonempty pull request description is required.');
+            }
+            if (flag('REQUIRE_ISSUE_REFERENCE') && !/(?:#\d+\b|https:\/\/github\.com\/[^\s/]+\/[^\s/]+\/issues\/\d+)/.test(current.body || '')) {
+              throw new Error('An issue reference is required in the pull request description.');
+            }
+            core.info('The current PR title and merge policy passed. Branch commits were not modified.');

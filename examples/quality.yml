@@ -1,0 +1,13 @@
+name: Workflow quality
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    uses: iamlordsandro/workflows/.github/workflows/workflow-quality.yml@v1

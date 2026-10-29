@@ -1,0 +1,32 @@
+name: Pull request
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, edited, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-metadata-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  policy:
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: ./.github/workflows/pr-title-normalize.yml
+  labels:
+    needs: policy
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    uses: ./.github/workflows/pr-labeler.yml
+  assignment:
+    needs: policy
+    permissions:
+      pull-requests: write
+      issues: write
+    uses: ./.github/workflows/pr-assignment.yml

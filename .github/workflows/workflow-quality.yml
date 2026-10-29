@@ -1,0 +1,127 @@
+name: Workflow quality
+
+on:
+  workflow_call:
+    inputs:
+      docs_root:
+        description: Directory to scan for Markdown local file targets, relative to the checkout.
+        required: false
+        type: string
+        default: .
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Workflow syntax and Markdown local file targets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Check workflow syntax
+        shell: bash
+        env:
+          ACTIONLINT_VERSION: '1.7.12'
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl --fail --silent --show-error --location --retry 3 \
+            --output "$archive" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          printf '%s  %s\n' "$ACTIONLINT_SHA256" "$archive" | sha256sum --check --status
+          tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint"
+
+      - name: Check Markdown local file targets
+        shell: bash
+        env:
+          DOCS_ROOT: ${{ inputs.docs_root }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import re
+          import sys
+          from urllib.parse import unquote, urlsplit
+
+          repository = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
+          selected = Path(os.environ["DOCS_ROOT"])
+          scan_root = (repository / selected).resolve()
+          if selected.is_absolute() or not scan_root.is_relative_to(repository) or not scan_root.is_dir():
+              sys.exit("docs_root must be an existing directory inside the checkout.")
+
+          # Check file targets only; anchors and external destinations are not validated.
+          destination = r'(?:<(?P<angle>[^>\n]+)>|(?P<plain>(?:\\.|[^()\s]|\([^()\s]*\))+))'
+          title = r'(?:\s+(?:"[^"\n]*"|\x27[^\x27\n]*\x27|\([^()\n]*\)))?'
+          inline_link = re.compile(r'!?\[[^\]\n]*\]\(\s*' + destination + title + r'\s*\)')
+          reference = re.compile(r'^ {0,3}\[[^\]\n]+\]:\s*' + destination + title + r'\s*$')
+          inline_code = re.compile(r'(?<!`)(`+)(?!`)(.*?)\1(?!`)')
+          fence_start = re.compile(r'^ {0,3}(`{3,}|~{3,})')
+          ignored = {".git", "node_modules"}
+          errors = []
+          files = 0
+          targets = 0
+
+          for current, directories, names in os.walk(scan_root, followlinks=False):
+              if any(part in ignored for part in Path(current).relative_to(repository).parts):
+                  directories[:] = []
+                  continue
+              directories[:] = sorted(name for name in directories if name not in ignored)
+              for name in sorted(names):
+                  if Path(name).suffix.lower() not in {".md", ".markdown"}:
+                      continue
+                  markdown = Path(current) / name
+                  label = markdown.relative_to(repository).as_posix()
+                  if not markdown.resolve().is_relative_to(repository):
+                      errors.append(f"{label}: Markdown file escapes the checkout.")
+                      continue
+                  files += 1
+                  try:
+                      text = markdown.read_text(encoding="utf-8")
+                  except (OSError, UnicodeError) as error:
+                      errors.append(f"{label}: cannot read Markdown: {error}")
+                      continue
+                  fence = None
+                  for number, line in enumerate(text.splitlines(), 1):
+                      if fence:
+                          if re.fullmatch(r' {0,3}' + re.escape(fence[0]) + '{' + str(fence[1]) + r',}\s*', line):
+                              fence = None
+                          continue
+                      opening = fence_start.match(line)
+                      if opening:
+                          marker = opening.group(1)
+                          fence = (marker[0], len(marker))
+                          continue
+                      if line.startswith(("    ", "\t")):
+                          continue
+                      line = inline_code.sub("", line)
+                      matches = list(inline_link.finditer(line))
+                      definition = reference.match(line)
+                      if definition:
+                          matches.append(definition)
+                      for match in matches:
+                          raw = match.group("angle") or match.group("plain")
+                          raw = re.sub(r'\\([!"#$%&\x27()*+,\-./:;<=>?@\[\\\]^_`{|}~])', r'\1', raw)
+                          try:
+                              url = urlsplit(raw)
+                              if url.scheme or url.netloc or not url.path or url.path.startswith("/"):
+                                  continue
+                              target = (markdown.parent / unquote(url.path)).resolve()
+                              targets += 1
+                              if not target.is_relative_to(repository):
+                                  errors.append(f"{label}:{number}: local file target escapes the checkout: {raw}")
+                              elif not target.exists():
+                                  errors.append(f"{label}:{number}: missing local file target: {raw}")
+                          except (OSError, ValueError) as error:
+                              errors.append(f"{label}:{number}: invalid local file target: {error}")
+
+          if errors:
+              print("\n".join(errors), file=sys.stderr)
+              sys.exit(1)
+          print(f"Checked {targets} local file targets in {files} Markdown files.")
+          PY
