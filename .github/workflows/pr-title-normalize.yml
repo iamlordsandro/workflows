@@ -116,11 +116,11 @@ jobs:
               const { repository: repo } = await github.graphql(`
                 query($owner: String!, $repo: String!) {
                   repository(owner: $owner, name: $repo) {
-                    squashMergeAllowed mergeCommitAllowed rebaseMergeAllowed squashMergeCommitHeadline
+                    squashMergeAllowed mergeCommitAllowed rebaseMergeAllowed squashMergeCommitTitle
                   }
                 }`, context.repo);
               if (!repo.squashMergeAllowed || repo.mergeCommitAllowed || repo.rebaseMergeAllowed ||
-                  repo.squashMergeCommitHeadline !== 'PR_TITLE') {
+                  repo.squashMergeCommitTitle !== 'PR_TITLE') {
                 throw new Error('Configure squash-only merges and use the pull request title as the default squash commit title.');
               }
             }
