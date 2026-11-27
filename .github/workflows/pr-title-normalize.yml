@@ -1,4 +1,4 @@
-name: PR title policy
+name: PR Title Policy
 
 on:
   workflow_call:
@@ -26,12 +26,12 @@ permissions:
 
 jobs:
   normalize:
-    name: Normalize and validate PR
+    name: Normalize and Validate PR
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       # Metadata only: never check out or execute pull request code here.
-      - name: Normalize the current title and validate the final merge policy
+      - name: Normalize the Current Title and Validate the Final Merge Policy
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           DEFAULT_TYPE: ${{ inputs.default_type }}

@@ -1,4 +1,4 @@
-name: Workflow quality
+name: Workflow Quality
 
 on:
   pull_request:

@@ -1,4 +1,4 @@
-name: PR assignment
+name: PR Assignment
 
 on:
   workflow_call:
@@ -16,7 +16,7 @@ jobs:
   assign:
     runs-on: ubuntu-latest
     steps:
-      - name: Assign the PR author and configured users
+      - name: Assign the PR Author and Configured Users
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           EXTRA_ASSIGNEES_JSON: ${{ inputs.extra_assignees_json }}

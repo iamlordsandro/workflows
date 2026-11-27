@@ -58,7 +58,7 @@ jobs:
       version: ${{ steps.outputs.outputs.version }}
       sha: ${{ steps.outputs.outputs.sha }}
     steps:
-      - name: Validate the release call
+      - name: Validate the Release Call
         shell: bash
         env:
           MODE: ${{ inputs.mode }}
@@ -90,7 +90,7 @@ jobs:
           skip-github-release: ${{ inputs.mode == 'prepare' }}
           skip-github-pull-request: ${{ inputs.mode == 'publish' }}
 
-      - name: Enable auto-merge for generated release PRs
+      - name: Enable auto-merge for Generated Release PRs
         if: inputs.auto_merge && steps.release.outputs.prs_created == 'true'
         shell: bash
         env:
@@ -102,7 +102,7 @@ jobs:
             gh pr merge "$number" --repo "$GITHUB_REPOSITORY" --auto --squash
           done <<<"$numbers"
 
-      - name: Return the selected package outputs
+      - name: Return the Selected Package Outputs
         id: outputs
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:

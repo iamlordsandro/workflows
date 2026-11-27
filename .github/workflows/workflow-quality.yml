@@ -1,4 +1,4 @@
-name: Workflow quality
+name: Workflow Quality
 
 on:
   workflow_call:
@@ -14,15 +14,15 @@ permissions:
 
 jobs:
   quality:
-    name: Workflow syntax and Markdown local file targets
+    name: Workflow Syntax and Markdown Local File Targets
     runs-on: ubuntu-latest
     steps:
-      - name: Check out caller repository
+      - name: Check Out Caller Repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
 
-      - name: Check workflow syntax
+      - name: Check Workflow Syntax
         shell: bash
         env:
           ACTIONLINT_VERSION: '1.7.12'
@@ -37,7 +37,7 @@ jobs:
           tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
           "$RUNNER_TEMP/actionlint"
 
-      - name: Check Markdown local file targets
+      - name: Check Markdown Local File Targets
         shell: bash
         env:
           DOCS_ROOT: ${{ inputs.docs_root }}

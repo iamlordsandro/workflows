@@ -1,4 +1,4 @@
-name: PR labeler
+name: PR Labeler
 
 on:
   workflow_call:
@@ -20,7 +20,7 @@ jobs:
   label:
     runs-on: ubuntu-latest
     steps:
-      - name: Apply existing PR labels
+      - name: Apply Existing PR Labels
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           TYPE_LABELS_JSON: ${{ inputs.type_labels_json }}
