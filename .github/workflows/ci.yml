@@ -15,16 +15,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Check Out the Repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
       - name: Test the Scripts Embedded in the Reusable Workflows
         run: node --test tests/*.test.cjs
   quality:
+    name: Quality
     uses: ./.github/workflows/workflow-quality.yml
 
   release:
-    name: Release the Workflow Library
+    name: Stage a Workflow Library Release
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [tests, quality]
     concurrency:
@@ -32,6 +34,75 @@ jobs:
       cancel-in-progress: false
     uses: ./.github/workflows/release-please.yml
     with:
+      mode: publish
+    secrets:
+      release_token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+
+  publish:
+    name: Publish the Tested Workflow Release
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      prepare: ${{ steps.publish.outputs.prepare }}
+    steps:
+      - name: Publish the Draft for This Commit
+        id: publish
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          github-token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          script: |
+            const repo = context.repo;
+            const sha = context.sha;
+            const { data: manifest } = await github.rest.repos.getContent({
+              ...repo, path: '.release-please-manifest.json', ref: sha,
+            });
+            const version = JSON.parse(Buffer.from(manifest.content, 'base64').toString('utf8'))['.'];
+            if (!/^\d+\.\d+\.\d+$/.test(version)) {
+              throw new Error('The workflow library manifest must contain a stable root version.');
+            }
+            const tag = `v${version}`;
+            const releases = await github.paginate(github.rest.repos.listReleases, { ...repo, per_page: 100 });
+            const pending = releases.filter((release) => release.draft && /^v\d+\.\d+\.\d+$/.test(release.tag_name));
+            const drafts = pending.filter((release) => release.tag_name === tag && release.target_commitish === sha);
+            // Prepare the next release only after the previous draft has a tag.
+            const readyToPrepare = pending.length === drafts.length;
+            core.setOutput('prepare', String(readyToPrepare));
+            if (!readyToPrepare) core.notice('Waiting for a release draft to be published by its own tested commit.');
+            if (drafts.length === 0) return;
+            if (drafts.length !== 1) throw new Error(`Found multiple drafts for ${tag} at ${sha}.`);
+
+            // An existing tag overrides target_commitish. Resolve it before publication.
+            let target;
+            try {
+              const { data } = await github.rest.git.getRef({ ...repo, ref: `tags/${tag}` });
+              target = data.object;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              const { data } = await github.rest.git.createRef({ ...repo, ref: `refs/tags/${tag}`, sha });
+              target = data.object;
+            }
+            while (target.type === 'tag') {
+              const { data } = await github.rest.git.getTag({ ...repo, tag_sha: target.sha });
+              target = data.object;
+            }
+            if (target.type !== 'commit' || target.sha !== sha) {
+              throw new Error(`Tag ${tag} does not point to the tested commit ${sha}.`);
+            }
+            await github.rest.repos.updateRelease({
+              ...repo, release_id: drafts[0].id, tag_name: tag, target_commitish: sha, draft: false,
+            });
+
+  prepare:
+    name: Prepare the Next Workflow Library Release
+    needs: publish
+    if: needs.publish.outputs.prepare == 'true'
+    concurrency:
+      group: workflows-release-prepare-main
+      cancel-in-progress: false
+    uses: ./.github/workflows/release-please.yml
+    with:
+      mode: prepare
       auto_merge: true
     secrets:
       release_token: ${{ secrets.RELEASE_PLEASE_TOKEN }}

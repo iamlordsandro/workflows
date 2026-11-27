@@ -60,6 +60,27 @@ test('a missing local target fails with its source location', (t) => {
   assert.match(result.stderr, /README\.md:1: missing local file target: docs\/missing\.md/);
 });
 
+test('a leading slash resolves from the repository root, including in references', (t) => {
+  const { checkout } = fixture(t, {
+    'docs/setup/README.md': '[Shared](/shared.md#top)\n\n[Logo]: /assets/logo.png\n',
+    'shared.md': 'Guide\n',
+    'assets/logo.png': '',
+  });
+  const result = check(checkout, 'docs');
+  expectSuccess(result);
+  assert.match(result.stdout, /Checked 2 local file targets/);
+});
+
+test('a missing repository-root target fails even if the path exists relative to the file', (t) => {
+  const { checkout } = fixture(t, {
+    'docs/README.md': '[Missing](/guide.md)\n',
+    'docs/guide.md': 'Guide\n',
+  });
+  const result = check(checkout);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /docs\/README\.md:1: missing local file target: \/guide\.md/);
+});
+
 test('anchors and external destinations are ignored without network access', (t) => {
   const { checkout } = fixture(t, {
     'README.md': '[Anchor](#unvalidated)\n[Web](https://example.invalid/missing)\n[HTTP](http://example.invalid)\n[Email](mailto:synthetic@example.invalid)\n[Network](//example.invalid/missing)\n',
@@ -86,6 +107,60 @@ test('links inside fenced, indented and inline code are ignored', (t) => {
   const result = check(checkout);
   expectSuccess(result);
   assert.match(result.stdout, /Checked 1 local file targets/);
+});
+
+test('fence contents stay literal inside block quotes and nested lists', (t) => {
+  const { checkout } = fixture(t, {
+    'README.md': [
+      '```markdown',
+      '> [Literal](top-level-fence.md)',
+      '```',
+      '',
+      '> ```markdown',
+      '> [Literal](quote-fence.md)',
+      '> > [Literal](quote-inside-fence.md)',
+      '> ```',
+      '> [Present](present.md)',
+      '',
+      '- Section',
+      '  - Example',
+      '    ~~~markdown',
+      '    [Literal](list-fence.md)',
+      '    ~~~',
+      '    [Present](present.md)',
+    ].join('\n'),
+    'present.md': 'Guide\n',
+  });
+  const result = check(checkout);
+  expectSuccess(result);
+  assert.match(result.stdout, /Checked 2 local file targets/);
+});
+
+test('a missing link in a nested list retains its source line', (t) => {
+  const { checkout } = fixture(t, {
+    'README.md': '- Section\n  - Subsection\n\n    [Missing](missing.md)\n',
+  });
+  const result = check(checkout);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /README\.md:4: missing local file target: missing\.md/);
+});
+
+test('HTML comments do not hide subsequent links or create file targets', (t) => {
+  const { checkout } = fixture(t, {
+    'README.md': [
+      '<!-- [Literal](block-comment.md)',
+      '```markdown',
+      '-->',
+      '',
+      'Text <!-- [Literal](inline-comment.md) --> [Present](present.md)',
+      '',
+      '`<!--` [Present](present.md)',
+    ].join('\n'),
+    'present.md': 'Guide\n',
+  });
+  const result = check(checkout);
+  expectSuccess(result);
+  assert.match(result.stdout, /Checked 2 local file targets/);
 });
 
 test('relative targets cannot escape the checkout even when they exist', (t) => {

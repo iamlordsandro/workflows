@@ -10,4 +10,5 @@ permissions:
 
 jobs:
   quality:
+    name: Quality
     uses: iamlordsandro/workflows/.github/workflows/workflow-quality.yml@v1

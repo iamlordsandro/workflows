@@ -3,6 +3,10 @@ name: PR Assignment
 on:
   workflow_call:
     inputs:
+      job_name:
+        description: Display name of the assignment job. Changes the status check name.
+        type: string
+        default: Assign the PR
       extra_assignees_json:
         description: JSON array of additional assignable GitHub usernames.
         type: string
@@ -14,6 +18,7 @@ permissions:
 
 jobs:
   assign:
+    name: ${{ inputs.job_name }}
     runs-on: ubuntu-latest
     steps:
       - name: Assign the PR Author and Configured Users

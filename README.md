@@ -18,11 +18,13 @@ PR titles use `type: subject` or `type!: subject`, without a scope. For example,
 
 The normalizer trims WIP/Draft/fixup/squash prefixes, whitespace and known type aliases. For an untyped title, a clear leading verb takes precedence over the branch type, then an unambiguous type from commit subjects, then `chore`. It preserves the subject language and does not invent a product summary.
 
-Configure the consumer to allow **only squash merges**, with the **PR title** as the default squash commit title, including single-commit PRs. Make the title policy a required check on the default branch. The workflow validates those repository settings by default. The final squash commit receives the normalized title; existing branch commits and their SHAs are never rewritten. GitHub still permits a user to edit the proposed squash message manually: these settings establish the default, not a server-side commit-message constraint.
+Configure the consumer to allow **only squash merges**, with the **PR title** as the default squash commit title, including single-commit PRs. Make the title policy a required check on the default branch. The workflow validates those repository settings by default. GitHub proposes the normalized title for the squash commit and lets the person merging edit the message. The workflow preserves all contributor commits and their SHAs.
 
 ## Adoption
 
 Follow [the adoption guide](docs/ADOPTION.md). Each consumer installs a small [PR caller](examples/pull-request.yml) and optionally a [quality caller](examples/quality.yml); creating this library does not activate workflows in other repositories.
+
+Use the [default-branch ruleset](.github/ruleset/default-branch-ruleset.json) to start with pull requests, squash-only merges, protection against deletion and force pushes, and this repository's three required checks. Review the check names for the destination repository before enabling it.
 
 Consumers can use a public library from public or private repositories. `@v1` tracks compatible releases; use an exact release tag or commit SHA when explicit upgrades are required. New features must be tested against an actual consumer before updating the major alias.
 
@@ -34,10 +36,12 @@ The title policy accepts `default_type` (`chore`), `require_description` (`false
 
 The labeler accepts `type_labels_json` and `path_labels_json`; use existing labels and configure project-specific paths. Assignment accepts `extra_assignees_json` (`[]`). Quality accepts `docs_root` (`.`). See each workflow for its input schema.
 
+The labeler, assignment, and quality workflows accept an optional `job_name` in versions that declare it. The defaults are `Apply PR Labels`, `Assign the PR`, and `Workflow Syntax and Markdown Local File Targets`. Changing a job name changes its status check context.
+
 ## Validation and releases
 
 Run `node --test tests/*.test.cjs`. Tests execute the scripts embedded in the YAML rather than a separate implementation. CI also runs actionlint and local Markdown target validation. The local link check does not verify external URLs or heading anchors.
 
-After CI passes on `main`, the library calls its own Release Please workflow to prepare or update a release PR. GitHub auto-merges that release PR once the required checks and reviews pass. Release Please then publishes the exact `vX.Y.Z` tag and changelog notes from the merge.
+After CI passes on `main`, the library calls the shared Release Please workflow to prepare release PRs and draft releases. GitHub auto-merges release PRs once the required checks and reviews pass. The library publishes a draft and its exact `vX.Y.Z` tag when the draft targets the commit tested by that run.
 
 The library uses `RELEASE_PLEASE_TOKEN` and repository auto-merge as a one-time setup. Consumers of the new release workflow can pin its exact release tag. Major aliases are promoted separately after consumer validation.

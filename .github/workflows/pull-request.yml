@@ -13,11 +13,13 @@ concurrency:
 
 jobs:
   policy:
+    name: Policy
     permissions:
       contents: read
       pull-requests: write
     uses: ./.github/workflows/pr-title-normalize.yml
   labels:
+    name: Labels
     needs: policy
     permissions:
       contents: read
@@ -25,6 +27,7 @@ jobs:
       issues: write
     uses: ./.github/workflows/pr-labeler.yml
   assignment:
+    name: Assignment
     needs: policy
     permissions:
       pull-requests: write
