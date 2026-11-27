@@ -24,7 +24,7 @@ The template preconfigures the same three GitHub Actions checks as this library 
 
 | Check | Consumer setup |
 | --- | --- |
-| `Policy / Normalize and Validate PR` | The [PR caller](../examples/pull-request.yml) uses the `Policy` prefix. With the published `@v1` pin, select `Policy / Normalize and validate PR`. |
+| `Policy / Normalize and Validate PR` | The [PR caller](../examples/pull-request.yml) uses the `Policy` prefix. With the published `@v1` pin, select `Policy / Normalize and Validate PR`. |
 | `Quality / Workflow Syntax and Markdown Local File Targets` | The [quality caller](../examples/quality.yml) uses the `Quality` prefix. With the published `@v1` pin, select `Quality / Workflow syntax and Markdown local file targets`. |
 | `Workflow Contract Tests` | Select the destination project's required test job if it has a different name. |
 
