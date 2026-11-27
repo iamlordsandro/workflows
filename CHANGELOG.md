@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/iamlordsandro/workflows/compare/v1.1.2...v1.2.0) (2026-11-27)
+
+
+### Features
+
+* sync repo settings ([#9](https://github.com/iamlordsandro/workflows/issues/9)) ([8246727](https://github.com/iamlordsandro/workflows/commit/8246727ba680a725f9b36f3065b3d548c3874892))
+
 ## [1.1.2](https://github.com/iamlordsandro/workflows/compare/v1.1.1...v1.1.2) (2026-11-27)
 
 
