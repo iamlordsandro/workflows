@@ -38,4 +38,6 @@ The labeler accepts `type_labels_json` and `path_labels_json`; use existing labe
 
 Run `node --test tests/*.test.cjs`. Tests execute the scripts embedded in the YAML rather than a separate implementation. CI also runs actionlint and local Markdown target validation. The local link check does not verify external URLs or heading anchors.
 
-Releases are explicit: after main CI succeeds, publish `vX.Y.Z` and point `vX` at that same commit. Do not retag an exact release. This library does not automatically merge PRs, rewrite contributor commits, create labels or modify consumer settings.
+After CI passes on `main`, the library calls its own Release Please workflow to prepare or update a release PR. GitHub auto-merges that release PR once the required checks and reviews pass. Release Please then publishes the exact `vX.Y.Z` tag and changelog notes from the merge.
+
+The library uses `RELEASE_PLEASE_TOKEN` and repository auto-merge as a one-time setup. Consumers of the new release workflow can pin its exact release tag. Major aliases are promoted separately after consumer validation.

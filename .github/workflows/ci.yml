@@ -22,3 +22,16 @@ jobs:
         run: node --test tests/*.test.cjs
   quality:
     uses: ./.github/workflows/workflow-quality.yml
+
+  release:
+    name: Release the workflow library
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [tests, quality]
+    concurrency:
+      group: workflows-release-main
+      cancel-in-progress: false
+    uses: ./.github/workflows/release-please.yml
+    with:
+      auto_merge: true
+    secrets:
+      release_token: ${{ secrets.RELEASE_PLEASE_TOKEN }}

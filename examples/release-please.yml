@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   release:
-    uses: iamlordsandro/workflows/.github/workflows/release-please.yml@v1
+    uses: iamlordsandro/workflows/.github/workflows/release-please.yml@v1.1.0
     with:
       auto_merge: true
     secrets:
