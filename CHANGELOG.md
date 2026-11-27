@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/iamlordsandro/workflows/compare/v1.1.0...v1.1.1) (2026-11-27)
+
+
+### Bug Fixes
+
+* fixed action names ([e8383a2](https://github.com/iamlordsandro/workflows/commit/e8383a2e83c05a2c76af8ef33e967c92b01c9b63))
+
 ## [1.1.0](https://github.com/iamlordsandro/workflows/compare/v1.0.0...v1.1.0) (2026-11-27)
 
 
