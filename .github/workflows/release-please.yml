@@ -1,0 +1,119 @@
+name: Release Please
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: Run preparation, publication, or both (prepare, publish, both).
+        type: string
+        default: both
+      target_branch:
+        description: Protected branch for release pull requests.
+        type: string
+        default: main
+      config_file:
+        description: Path to Release Please configuration in the caller.
+        type: string
+        default: release-please-config.json
+      manifest_file:
+        description: Path to the Release Please manifest in the caller.
+        type: string
+        default: .release-please-manifest.json
+      package_path:
+        description: Package path for the release outputs.
+        type: string
+        default: '.'
+      auto_merge:
+        description: Enable squash auto-merge on generated release PRs after required checks pass.
+        type: boolean
+        default: false
+    secrets:
+      release_token:
+        description: Repository-scoped GitHub App or PAT for release writes and PR CI.
+        required: true
+    outputs:
+      release_created:
+        description: Whether Release Please created a release for package_path.
+        value: ${{ jobs.release.outputs.release_created }}
+      tag_name:
+        description: Tag for the created release.
+        value: ${{ jobs.release.outputs.tag_name }}
+      version:
+        description: Version for the created release.
+        value: ${{ jobs.release.outputs.version }}
+      sha:
+        description: Commit tagged by Release Please.
+        value: ${{ jobs.release.outputs.sha }}
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      release_created: ${{ steps.outputs.outputs.release_created }}
+      tag_name: ${{ steps.outputs.outputs.tag_name }}
+      version: ${{ steps.outputs.outputs.version }}
+      sha: ${{ steps.outputs.outputs.sha }}
+    steps:
+      - name: Validate the release call
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+          TARGET_BRANCH: ${{ inputs.target_branch }}
+          RELEASE_TOKEN: ${{ secrets.release_token }}
+        run: |
+          if [[ "$GITHUB_REF" != "refs/heads/$TARGET_BRANCH" ]] ||
+             [[ "$GITHUB_EVENT_NAME" != push && "$GITHUB_EVENT_NAME" != workflow_dispatch ]]; then
+            echo "::error::Run Release Please from the protected target branch."
+            exit 1
+          fi
+          case "$MODE" in
+            prepare|publish|both) ;;
+            *) echo "::error::Set mode to prepare, publish, or both."; exit 1 ;;
+          esac
+          if [[ -z "$RELEASE_TOKEN" ]]; then
+            echo "::error::Configure a repository-scoped release token before running Release Please."
+            exit 1
+          fi
+
+      - name: Run Release Please
+        id: release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ secrets.release_token }}
+          target-branch: ${{ inputs.target_branch }}
+          config-file: ${{ inputs.config_file }}
+          manifest-file: ${{ inputs.manifest_file }}
+          skip-github-release: ${{ inputs.mode == 'prepare' }}
+          skip-github-pull-request: ${{ inputs.mode == 'publish' }}
+
+      - name: Enable auto-merge for generated release PRs
+        if: inputs.auto_merge && steps.release.outputs.prs_created == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.release_token }}
+          RELEASE_PULL_REQUESTS: ${{ steps.release.outputs.prs }}
+        run: |
+          numbers="$(jq -er 'map(.number) | select(length > 0 and all(type == "number" and . > 0 and floor == .)) | .[]' <<<"$RELEASE_PULL_REQUESTS")"
+          while IFS= read -r number; do
+            gh pr merge "$number" --repo "$GITHUB_REPOSITORY" --auto --squash
+          done <<<"$numbers"
+
+      - name: Return the selected package outputs
+        id: outputs
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          PACKAGE_PATH: ${{ inputs.package_path }}
+          RELEASE_OUTPUTS: ${{ toJSON(steps.release.outputs) }}
+        with:
+          script: |
+            const outputs = JSON.parse(process.env.RELEASE_OUTPUTS);
+            const prefix = process.env.PACKAGE_PATH === '.' ? '' : process.env.PACKAGE_PATH + '--';
+            const created = outputs[prefix + 'release_created'] === 'true';
+            core.setOutput('release_created', String(created));
+            for (const key of ['tag_name', 'version', 'sha']) {
+              core.setOutput(key, created ? outputs[prefix + key] || '' : '');
+            }

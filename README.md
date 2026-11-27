@@ -10,6 +10,7 @@ Versioned repository automation for projects owned by `iamlordsandro`. This publ
 | [`pr-labeler.yml`](.github/workflows/pr-labeler.yml) | Apply configurable type and path labels without changing unrelated labels. |
 | [`pr-assignment.yml`](.github/workflows/pr-assignment.yml) | Assign the author and configured eligible users; skip bots. |
 | [`workflow-quality.yml`](.github/workflows/workflow-quality.yml) | Run actionlint and check local file targets in Markdown. |
+| [`release-please.yml`](.github/workflows/release-please.yml) | Run Release Please with the caller's manifest, optional auto-merge, and release outputs. |
 
 ## Final commits on main
 
@@ -25,7 +26,7 @@ Follow [the adoption guide](docs/ADOPTION.md). Each consumer installs a small [P
 
 Consumers can use a public library from public or private repositories. `@v1` tracks compatible releases; use an exact release tag or commit SHA when explicit upgrades are required. New features must be tested against an actual consumer before updating the major alias.
 
-Builds, deployments and project-specific release automation remain in their existing libraries. Initial adoption is deliberately separate from mass migration.
+Use the [Release Please guide](docs/RELEASE.md) for versioning and publication. Builds and deployments remain with each consumer.
 
 ## Inputs
 
