@@ -1,4 +1,4 @@
-name: Pull request
+name: Pull Request
 
 on:
   pull_request_target:
@@ -13,11 +13,13 @@ concurrency:
 
 jobs:
   policy:
+    name: Policy
     permissions:
       contents: read
       pull-requests: write
     uses: iamlordsandro/workflows/.github/workflows/pr-title-normalize.yml@v1
   labels:
+    name: Labels
     needs: policy
     permissions:
       contents: read
@@ -25,6 +27,7 @@ jobs:
       issues: write
     uses: iamlordsandro/workflows/.github/workflows/pr-labeler.yml@v1
   assignment:
+    name: Assignment
     needs: policy
     permissions:
       pull-requests: write

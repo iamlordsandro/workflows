@@ -1,4 +1,4 @@
-name: PR title policy
+name: PR Title Policy
 
 on:
   workflow_call:
@@ -26,12 +26,11 @@ permissions:
 
 jobs:
   normalize:
-    name: Normalize and validate PR
+    name: Normalize and Validate PR
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      # Metadata only: never check out or execute pull request code here.
-      - name: Normalize the current title and validate the final merge policy
+      - name: Normalize the Current Title and Validate the Final Merge Policy
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           DEFAULT_TYPE: ${{ inputs.default_type }}
@@ -92,12 +91,20 @@ jobs:
               const branchType = branchPrefix && typeFor(branchPrefix);
               let commitType = null;
               if (!titleType && !branchType) {
-                const commits = await github.paginate(github.rest.pulls.listCommits, { ...ref, per_page: 100 });
-                const seen = new Set(commits.map(({ commit }) => {
-                  const match = commit.message.split('\n', 1)[0].match(/^([a-z]+)(?:\([^()]+\))?!?:\s+\S/i);
-                  return match && typeFor(match[1]);
-                }).filter(Boolean));
-                if (seen.size === 1) commitType = seen.values().next().value;
+                const commitLimit = 250;
+                const commits = initial.commits > commitLimit ? [] :
+                  await github.paginate(github.rest.pulls.listCommits, { ...ref, per_page: 100 });
+                const complete = initial.commits === undefined ? commits.length < commitLimit :
+                  commits.length === initial.commits;
+                if (complete) {
+                  const seen = new Set(commits.map(({ commit }) => {
+                    const match = commit.message.split('\n', 1)[0].match(/^([a-z]+)(?:\([^()]+\))?!?:\s+\S/i);
+                    return match && typeFor(match[1]);
+                  }).filter(Boolean));
+                  if (seen.size === 1) commitType = seen.values().next().value;
+                } else {
+                  core.warning('The complete commit list is unavailable. Using the configured default type.');
+                }
               }
               title = `${titleType || branchType || commitType || defaultType}: ${title}`;
             }

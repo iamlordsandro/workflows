@@ -6,7 +6,8 @@ const workflow = '.github/workflows/pr-title-normalize.yml';
 
 function fixture(title, options = {}) {
   const pull = { number: 7, title, state: 'open', body: 'Refs #12',
-    head: { sha: 'head-1', ref: options.branch || 'topic' }, ...options.pull };
+    head: { sha: 'head-1', ref: options.branch || 'topic' },
+    commits: options.commits?.length ?? 0, ...options.pull };
   const calls = [];
   let reads = 0;
   const settings = { allow_squash_merge: true, allow_merge_commit: false,
@@ -35,7 +36,7 @@ function fixture(title, options = {}) {
   const context = { repo: { owner: 'example', repo: 'consumer' },
     payload: { pull_request: { number: 7, title: 'stale payload title' } } };
   return { pull, calls, github, context,
-    run: (env = {}) => runWorkflow(workflow, { github, context, env }) };
+    run: (env = {}, core = {}) => runWorkflow(workflow, { github, context, env, core }) };
 }
 
 for (const [before, after] of [
@@ -85,6 +86,24 @@ test('mixed commit types use the configured fallback', async () => {
   const f = fixture('refresh behavior', { commits: ['fix: repair', 'docs: describe'] });
   await f.run({ DEFAULT_TYPE: 'refactor' });
   assert.equal(f.pull.title, 'refactor: refresh behavior');
+});
+test('uses commit subjects at the list limit when the count confirms coverage', async () => {
+  const f = fixture('refresh behavior', { commits: Array(250).fill('fix: repair') });
+  await f.run();
+  assert.equal(f.pull.title, 'fix: refresh behavior');
+});
+test('uses the configured fallback above the commit list limit', async () => {
+  const f = fixture('refresh behavior', { pull: { commits: 251 } });
+  f.github.paginate = async () => assert.fail('The API cannot list all commits for this PR.');
+  const warnings = [];
+  await f.run({ DEFAULT_TYPE: 'refactor' }, { warning: (message) => warnings.push(message) });
+  assert.equal(f.pull.title, 'refactor: refresh behavior');
+  assert.match(warnings.join('\n'), /complete commit list is unavailable/);
+});
+test('does not infer the type from a shorter list than the reported count', async () => {
+  const f = fixture('refresh behavior', { commits: ['fix: repair'], pull: { commits: 2 } });
+  await f.run();
+  assert.equal(f.pull.title, 'chore: refresh behavior');
 });
 test('the default fallback is chore', async () => {
   const f = fixture('refresh behavior');

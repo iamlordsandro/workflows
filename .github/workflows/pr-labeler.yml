@@ -1,8 +1,12 @@
-name: PR labeler
+name: PR Labeler
 
 on:
   workflow_call:
     inputs:
+      job_name:
+        description: Display name of the labeler job. Changes the status check name.
+        type: string
+        default: Apply PR Labels
       type_labels_json:
         description: JSON object mapping conventional commit types to existing labels.
         type: string
@@ -18,9 +22,10 @@ permissions:
 
 jobs:
   label:
+    name: ${{ inputs.job_name }}
     runs-on: ubuntu-latest
     steps:
-      - name: Apply existing PR labels
+      - name: Apply Existing PR Labels
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           TYPE_LABELS_JSON: ${{ inputs.type_labels_json }}
@@ -106,11 +111,21 @@ jobs:
             const type = pull.title.match(/^([a-z][a-z0-9-]*)(?:\([^()\r\n]+\))?!?:[ \t]+\S/i)?.[1].toLowerCase();
             if (typeLabels.has(type)) desired.add(canonicalLabels.get(typeLabels.get(type)));
             if (pathLabels.length) {
+              const fileLimit = 3000;
+              if (pull.changed_files > fileLimit) {
+                throw new Error('GitHub lists at most 3,000 changed files. Split the pull request or apply its labels manually.');
+              }
               const files = await github.paginate(github.rest.pulls.listFiles, {
                 owner, repo, pull_number: pullNumber, per_page: 100,
               });
+              const paths = files.map(({ filename }) => filename);
+              const complete = pull.changed_files === undefined ? files.length < fileLimit :
+                files.length === pull.changed_files;
+              if (!complete || new Set(paths).size !== paths.length) {
+                throw new Error('GitHub did not return the complete changed-file list. Rerun the labeler or apply labels manually.');
+              }
               for (const [label, patterns] of pathLabels) {
-                if (files.some((file) => patterns.some((pattern) => pattern.test(file.filename)))) {
+                if (paths.some((path) => patterns.some((pattern) => pattern.test(path)))) {
                   desired.add(canonicalLabels.get(label));
                 }
               }

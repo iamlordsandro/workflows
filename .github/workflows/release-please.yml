@@ -50,6 +50,7 @@ permissions:
 
 jobs:
   release:
+    name: Run Release Please
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -58,7 +59,7 @@ jobs:
       version: ${{ steps.outputs.outputs.version }}
       sha: ${{ steps.outputs.outputs.sha }}
     steps:
-      - name: Validate the release call
+      - name: Validate the Release Call
         shell: bash
         env:
           MODE: ${{ inputs.mode }}
@@ -90,19 +91,81 @@ jobs:
           skip-github-release: ${{ inputs.mode == 'prepare' }}
           skip-github-pull-request: ${{ inputs.mode == 'publish' }}
 
-      - name: Enable auto-merge for generated release PRs
-        if: inputs.auto_merge && steps.release.outputs.prs_created == 'true'
+      - name: Enable Auto-Merge for Generated Release PRs
+        if: inputs.auto_merge && inputs.mode != 'publish'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.release_token }}
           RELEASE_PULL_REQUESTS: ${{ steps.release.outputs.prs }}
+          TARGET_BRANCH: ${{ inputs.target_branch }}
+          CONFIG_FILE: ${{ inputs.config_file }}
+          MANIFEST_FILE: ${{ inputs.manifest_file }}
         run: |
-          numbers="$(jq -er 'map(.number) | select(length > 0 and all(type == "number" and . > 0 and floor == .)) | .[]' <<<"$RELEASE_PULL_REQUESTS")"
-          while IFS= read -r number; do
-            gh pr merge "$number" --repo "$GITHUB_REPOSITORY" --auto --squash
-          done <<<"$numbers"
+          node <<'JS'
+          const { execFileSync } = require('node:child_process');
+          const { GITHUB_REPOSITORY: repository, TARGET_BRANCH: branch } = process.env;
+          const configFile = process.env.CONFIG_FILE || 'release-please-config.json';
+          const manifestFile = process.env.MANIFEST_FILE || '.release-please-manifest.json';
+          const branchPrefix = 'release-please--branches--' + branch;
+          const reported = JSON.parse(process.env.RELEASE_PULL_REQUESTS || '[]');
+          const validNumber = (number) => Number.isSafeInteger(number) && number > 0;
+          if (!Array.isArray(reported) || reported.some((pull) => !validNumber(pull?.number) ||
+              pull.baseBranchName !== branch || typeof pull.headBranchName !== 'string')) {
+            throw new Error('Release Please returned invalid pull request metadata.');
+          }
+          const reportedHeads = new Map(reported.map((pull) => [pull.number, pull.headBranchName]));
+          const gh = (...args) => JSON.parse(execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 }));
+          const endpoint = 'repos/' + repository;
+          const pulls = gh('api', '--paginate', '--slurp', '--method', 'GET', endpoint + '/pulls',
+            '-f', 'state=open', '-f', 'base=' + branch, '-f', 'per_page=100').flat();
+          const candidates = pulls.filter((pull) => {
+            const head = pull.head.ref;
+            return pull.state === 'open' && !pull.draft && pull.base.ref === branch &&
+              pull.head.repo?.id === pull.base.repo.id &&
+              (reportedHeads.get(pull.number) === head || head === branchPrefix ||
+                ['--components--', '--groups--'].some((suffix) => head.startsWith(branchPrefix + suffix) &&
+                  head.length > branchPrefix.length + suffix.length));
+          });
+          if (!candidates.length) process.exit(0);
 
-      - name: Return the selected package outputs
+          const { data: { viewer } } = gh('api', 'graphql', '-f', 'query=query { viewer { login } }');
+          if (!viewer?.login) throw new Error('Could not identify the release token owner.');
+          const owned = candidates.filter((pull) => pull.user?.login === viewer.login);
+          if (candidates.some((pull) => reportedHeads.has(pull.number) &&
+              (reportedHeads.get(pull.number) !== pull.head.ref || pull.user?.login !== viewer.login))) {
+            throw new Error('A reported release pull request has an unexpected head or author.');
+          }
+
+          let pendingLabels;
+          for (const pull of owned) {
+            if (!validNumber(pull.number)) throw new Error('GitHub returned an invalid pull request number.');
+            const number = String(pull.number);
+            if (!reportedHeads.has(pull.number)) {
+              // Release Please omits open pull requests whose release notes did not change.
+              if (!pendingLabels) {
+                const path = configFile.split('/').map(encodeURIComponent).join('/');
+                const { content } = gh('api', '--method', 'GET', endpoint + '/contents/' + path, '-f', 'ref=' + branch);
+                const config = JSON.parse(Buffer.from(content, 'base64').toString('utf8'));
+                pendingLabels = (config.label ?? 'autorelease: pending').split(',');
+              }
+              if (!pendingLabels.every((name) => name && pull.labels.some((label) => label.name === name))) continue;
+              const files = gh('api', '--paginate', '--slurp', endpoint + '/pulls/' + number + '/files?per_page=100').flat();
+              if (!files.some((file) => file.filename === manifestFile && file.status === 'modified')) {
+                throw new Error('Could not verify the release manifest change for pull request #' + number + '.');
+              }
+            }
+            const live = gh('pr', 'view', number, '--repo', repository,
+              '--json', 'state,isDraft,baseRefName,headRefOid,autoMergeRequest');
+            if (live.state !== 'OPEN' || live.isDraft || live.autoMergeRequest?.mergeMethod === 'SQUASH') continue;
+            if (live.baseRefName !== branch || live.headRefOid !== pull.head.sha || !/^[a-f0-9]{40}$/.test(live.headRefOid)) {
+              throw new Error('The release pull request changed during verification. Retry against its current head.');
+            }
+            execFileSync('gh', ['pr', 'merge', number, '--repo', repository, '--auto', '--squash',
+              '--match-head-commit', live.headRefOid], { stdio: 'inherit' });
+          }
+          JS
+
+      - name: Return the Selected Package Outputs
         id: outputs
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:

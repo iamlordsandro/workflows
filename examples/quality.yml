@@ -1,4 +1,4 @@
-name: Workflow quality
+name: Workflow Quality
 
 on:
   pull_request:
@@ -10,4 +10,5 @@ permissions:
 
 jobs:
   quality:
+    name: Quality
     uses: iamlordsandro/workflows/.github/workflows/workflow-quality.yml@v1

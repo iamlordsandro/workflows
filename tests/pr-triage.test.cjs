@@ -12,6 +12,7 @@ function apiError(status) {
 function fixture(options = {}) {
   const state = {
     title: options.title ?? 'fix: handle missing data',
+    changed_files: options.changedFiles ?? options.files?.length ?? 1,
     labels: (options.labels ?? ['keep-me']).map((name) => ({ name })),
     user: options.author ?? { login: 'alice', type: 'User' },
     assignees: (options.assignees ?? []).map((login) => ({ login })),
@@ -114,6 +115,29 @@ test('documentation selected by paths survives a type change', async () => {
   await runWorkflow(labeler, mock);
   assert.deepEqual(mock.state.labels.map(({ name }) => name), ['documentation', 'enhancement']);
   assert.equal(mock.mutations().some(({ method }) => method === 'issues.removeLabel'), false);
+});
+
+test('labeler evaluates all paths when the file count equals the API limit', async () => {
+  const files = Array.from({ length: 2999 }, (_, index) => `source/file-${index}.js`);
+  files.push('docs/sharing.md');
+  const mock = fixture({ files });
+  await runWorkflow(labeler, mock);
+  assert.deepEqual(mock.state.labels.map(({ name }) => name), ['keep-me', 'bug', 'documentation']);
+});
+
+test('labeler fails without any mutation above the file list limit', async () => {
+  const mock = fixture({ changedFiles: 3001 });
+  await assert.rejects(runWorkflow(labeler, mock), /at most 3,000 changed files.*apply its labels manually/);
+  assert.equal(mock.calls.some(({ method }) => method === 'pulls.listFiles'), false);
+  assert.deepEqual(mock.mutations(), []);
+});
+
+test('labeler keeps existing labels when changed-file coverage is incomplete', async () => {
+  for (const files of [['source/app.js'], ['source/app.js', 'source/app.js']]) {
+    const mock = fixture({ title: 'feat: add sharing', labels: ['documentation'], changedFiles: 2, files });
+    await assert.rejects(runWorkflow(labeler, mock), /did not return the complete changed-file list/);
+    assert.deepEqual(mock.mutations(), []);
+  }
 });
 
 test('custom paths support globstar, question marks and literal regex characters', async () => {

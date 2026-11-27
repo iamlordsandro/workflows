@@ -1,8 +1,12 @@
-name: Workflow quality
+name: Workflow Quality
 
 on:
   workflow_call:
     inputs:
+      job_name:
+        description: Display name of the quality job. Changes the status check name.
+        type: string
+        default: Workflow Syntax and Markdown Local File Targets
       docs_root:
         description: Directory to scan for Markdown local file targets, relative to the checkout.
         required: false
@@ -14,15 +18,15 @@ permissions:
 
 jobs:
   quality:
-    name: Workflow syntax and Markdown local file targets
+    name: ${{ inputs.job_name }}
     runs-on: ubuntu-latest
     steps:
-      - name: Check out caller repository
+      - name: Check Out Caller Repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
 
-      - name: Check workflow syntax
+      - name: Check Workflow Syntax
         shell: bash
         env:
           ACTIONLINT_VERSION: '1.7.12'
@@ -37,7 +41,7 @@ jobs:
           tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
           "$RUNNER_TEMP/actionlint"
 
-      - name: Check Markdown local file targets
+      - name: Check Markdown Local File Targets
         shell: bash
         env:
           DOCS_ROOT: ${{ inputs.docs_root }}
@@ -60,8 +64,85 @@ jobs:
           title = r'(?:\s+(?:"[^"\n]*"|\x27[^\x27\n]*\x27|\([^()\n]*\)))?'
           inline_link = re.compile(r'!?\[[^\]\n]*\]\(\s*' + destination + title + r'\s*\)')
           reference = re.compile(r'^ {0,3}\[[^\]\n]+\]:\s*' + destination + title + r'\s*$')
-          inline_code = re.compile(r'(?<!`)(`+)(?!`)(.*?)\1(?!`)')
+          inline_literal = re.compile(r'(?<!`)(`+)(?!`)(.*?)\1(?!`)|<!--(?:.*?-->|.*$)')
           fence_start = re.compile(r'^ {0,3}(`{3,}|~{3,})')
+          quote_prefix = re.compile(r'^ {0,3}>[ \t]?')
+          list_prefix = re.compile(r'^ {0,3}(?:[-+*]|[0-9]{1,9}[.)]) {1,4}(?=\S)')
+
+          def visible_lines(text):
+              quote_depth = 0
+              list_indents = [0]
+              fence = None
+              comment = None
+              for number, line in enumerate(text.splitlines(), 1):
+                  depth = 0
+                  while not (fence or comment) or depth < quote_depth:
+                      prefix = quote_prefix.match(line)
+                      if not prefix:
+                          break
+                      line = line[prefix.end():]
+                      depth += 1
+                  if depth != quote_depth:
+                      quote_depth = depth
+                      list_indents = [0]
+                      fence = None
+                      comment = None
+
+                  leading = len(line) - len(line.lstrip(" \t"))
+                  line = line[:leading].expandtabs(4) + line[leading:]
+                  indent = len(line) - len(line.lstrip(" "))
+                  if line.strip():
+                      while list_indents[-1] > indent:
+                          list_indents.pop()
+                  content_indent = list_indents[-1]
+                  line = line[content_indent:]
+
+                  if fence:
+                      marker, fence_indent = fence
+                      if line.strip() and content_indent < fence_indent:
+                          fence = None
+                      else:
+                          if re.fullmatch(r' {0,3}' + re.escape(marker[0]) + '{' + str(len(marker)) + r',}\s*', line):
+                              fence = None
+                          continue
+
+                  if comment:
+                      _, end, remainder = line.partition("-->")
+                      if not end:
+                          continue
+                      if comment == "block":
+                          comment = None
+                          continue
+                      comment = None
+                      line = remainder
+
+                  if prefix := list_prefix.match(line):
+                      list_indents.append(content_indent + prefix.end())
+                      content_indent = list_indents[-1]
+                      line = line[prefix.end():]
+                  if opening := fence_start.match(line):
+                      marker = opening.group(1)
+                      if marker[0] == "~" or "`" not in line[opening.end():]:
+                          fence = (marker, content_indent)
+                          continue
+                  if line.startswith("    "):
+                      continue
+                  if line.lstrip().startswith("<!--"):
+                      if "-->" not in line:
+                          comment = "block"
+                      continue
+
+                  pieces = []
+                  position = 0
+                  for literal in inline_literal.finditer(line):
+                      pieces.append(line[position:literal.start()])
+                      pieces.append(" " * (literal.end() - literal.start()))
+                      position = literal.end()
+                      if literal.group().startswith("<!--") and not literal.group().endswith("-->"):
+                          comment = "inline"
+                  pieces.append(line[position:])
+                  yield number, "".join(pieces)
+
           ignored = {".git", "node_modules"}
           errors = []
           files = 0
@@ -86,20 +167,7 @@ jobs:
                   except (OSError, UnicodeError) as error:
                       errors.append(f"{label}: cannot read Markdown: {error}")
                       continue
-                  fence = None
-                  for number, line in enumerate(text.splitlines(), 1):
-                      if fence:
-                          if re.fullmatch(r' {0,3}' + re.escape(fence[0]) + '{' + str(fence[1]) + r',}\s*', line):
-                              fence = None
-                          continue
-                      opening = fence_start.match(line)
-                      if opening:
-                          marker = opening.group(1)
-                          fence = (marker[0], len(marker))
-                          continue
-                      if line.startswith(("    ", "\t")):
-                          continue
-                      line = inline_code.sub("", line)
+                  for number, line in visible_lines(text):
                       matches = list(inline_link.finditer(line))
                       definition = reference.match(line)
                       if definition:
@@ -109,9 +177,11 @@ jobs:
                           raw = re.sub(r'\\([!"#$%&\x27()*+,\-./:;<=>?@\[\\\]^_`{|}~])', r'\1', raw)
                           try:
                               url = urlsplit(raw)
-                              if url.scheme or url.netloc or not url.path or url.path.startswith("/"):
+                              if url.scheme or url.netloc or not url.path:
                                   continue
-                              target = (markdown.parent / unquote(url.path)).resolve()
+                              directory = repository if url.path.startswith("/") else markdown.parent
+                              local_path = unquote(url.path.removeprefix("/"))
+                              target = (directory / local_path).resolve()
                               targets += 1
                               if not target.is_relative_to(repository):
                                   errors.append(f"{label}:{number}: local file target escapes the checkout: {raw}")
