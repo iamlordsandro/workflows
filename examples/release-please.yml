@@ -1,0 +1,21 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release:
+    uses: iamlordsandro/workflows/.github/workflows/release-please.yml@v1
+    with:
+      auto_merge: true
+    secrets:
+      release_token: ${{ secrets.RELEASE_PLEASE_TOKEN }}

@@ -24,7 +24,7 @@ The final commit policy applies to the new squash commit. Intermediate commits m
 
 Use `@v1` for compatible shared updates, or pin an exact release tag or commit SHA. The library must publish the referenced version before a consumer adopts it.
 
-Start with one consumer, verify its real PR checks and final squash message, then migrate the remaining repositories in separate reviewed changes. Keep Igevia/Bostrom build, release, infrastructure and deployment workflows in their existing libraries.
+Start with one consumer, verify its real PR checks and final squash message, then migrate the remaining repositories in separate reviewed changes. Use the [Release Please guide](RELEASE.md) when adopting shared versioning. Migrate existing release callers individually, preserving project-specific checks, infrastructure, and deployment workflows.
 
 ## References
 
