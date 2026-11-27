@@ -4,11 +4,12 @@
 
 1. Allow the public `iamlordsandro/workflows` repository and the pinned official actions in the consumer's Actions policy.
 2. Allow squash merging; disable merge commits and rebase merging. Select the PR title as the default squash commit title and optionally the PR description as its body. These are repository settings, not a rewrite of existing commits.
-3. Copy [the PR caller](../examples/pull-request.yml) to `.github/workflows/pull-request.yml`. Remove or disable the consumer's previous normalizer, labeler and assignment callers in the same reviewed change to avoid competing writers.
-4. Confirm that configured labels exist. The defaults use GitHub's standard `bug`, `enhancement` and `documentation` labels. To customize paths or label names, pass JSON inputs to the labeler.
-5. Open a test PR and wait for the title policy, labels and assignment. Inspect the actual check names before configuring branch protection: reusable callers add job-name prefixes.
-6. Require the successful title policy check and the project's normal CI on the default branch. Require pull requests and disallow force pushes. Keep the consumer's existing review policy.
-7. Optionally copy [the quality caller](../examples/quality.yml). Its jobs run with read-only permissions and do not require secrets.
+3. Enable **Automatically delete head branches** under **Settings → General → Pull Requests**, or run `gh repo edit OWNER/REPOSITORY --delete-branch-on-merge`. GitHub applies this repository setting to merged PR head branches where branch protections allow deletion. See [automatic branch deletion](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-the-automatic-deletion-of-branches).
+4. Copy [the PR caller](../examples/pull-request.yml) to `.github/workflows/pull-request.yml`. Remove or disable the consumer's previous normalizer, labeler and assignment callers in the same reviewed change to avoid competing writers.
+5. Confirm that configured labels exist. The defaults use GitHub's standard `bug`, `enhancement` and `documentation` labels. To customize paths or label names, pass JSON inputs to the labeler.
+6. Open a test PR and wait for the title policy, labels and assignment. Inspect the actual check names before configuring branch protection: reusable callers add job-name prefixes.
+7. Require the successful title policy check and the project's normal CI on the default branch. Require pull requests and disallow force pushes. Keep the consumer's existing review policy.
+8. Optionally copy [the quality caller](../examples/quality.yml). Its jobs run with read-only permissions and do not require secrets.
 
 The title policy requests only metadata access and PR write permission. Labeling and assignment additionally need issue write permission. Never grant a privileged metadata workflow a checkout of PR code, a caller-provided shell command or inherited deployment credentials.
 
@@ -18,7 +19,7 @@ The title policy requests only metadata access and PR write permission. Labeling
 2. Review the disabled ruleset against existing protections. It targets the default branch, requires a pull request and squash merge, blocks force pushes and deletion, and has no bypass actors. Preserve the existing review requirements.
 3. Configure the repository to use the PR title for squash commit titles. Run a test PR and match each required check to an actual job in the destination repository before enabling the ruleset.
 
-Import the file in each personal repository. An eligible organization can target multiple repositories through an [organization ruleset](https://docs.github.com/en/organizations/managing-organization-settings/creating-rulesets-for-repositories-in-your-organization). GitHub documents [plan availability and import steps](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/managing-rulesets-for-a-repository).
+For personal repositories, you can import the file in bulk with the script below. An eligible organization can target multiple repositories through an [organization ruleset](https://docs.github.com/en/organizations/managing-organization-settings/creating-rulesets-for-repositories-in-your-organization). GitHub documents [plan availability and import steps](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/managing-rulesets-for-a-repository).
 
 The template preconfigures the same three GitHub Actions checks as this library and requires branches to be up to date.
 
@@ -29,6 +30,21 @@ The template preconfigures the same three GitHub Actions checks as this library 
 | `Workflow Contract Tests` | Select the destination project's required test job if it has a different name. |
 
 Use the title policy to validate the PR title. GitHub applies [commit-message rules](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository#adding-metadata-restrictions) to every branch commit in a squash merge.
+
+## Synchronize personal repositories
+
+Run [the sync script](../scripts/sync-repositories.cjs) with Node.js 20 or later and a current GitHub CLI authenticated as the personal account owner. It uses the CLI's existing authentication. Applying changes requires write access to repository administration.
+
+```sh
+node scripts/sync-repositories.cjs --owner iamlordsandro
+node scripts/sync-repositories.cjs --owner iamlordsandro --repo cv-builder --apply
+```
+
+The first command prints a JSON preview. Repeat `--repo` to select multiple repositories, or omit it to include all repositories visible to the CLI that the account owns. The script skips forks, archived and disabled repositories, and repositories without admin access.
+
+With `--apply`, the script enables automatic deletion of merged PR branches and configures squash-only merges using the PR title and description. If an active branch ruleset prevents squash merging, it reports the conflict and leaves that repository's merge settings as they are. It imports the shared ruleset disabled wherever a repository ruleset with the same name is absent. Existing rulesets are preserved. Review each repository's checks and enable its imported ruleset when ready.
+
+The same report records applied settings, ruleset creation, and per-repository errors. The script continues with the remaining repositories and exits with a nonzero status if it detects any errors or merge conflicts.
 
 ## Event behavior
 
